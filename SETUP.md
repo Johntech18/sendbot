@@ -59,6 +59,10 @@ Any machine that stays on works: `npm start` in a terminal (or `pm2 start index.
 
 Set `SPORTS=football,fight,motorsport` (comma-separated). Valid: `football, basketball, hockey, baseball, motorsport, fight, tennis, american-football`.
 
+## Daily digest
+
+Every morning at `DIGEST_HOUR` (WAT, default 8) the bot posts today's full schedule: per-sport sections, kickoff times and clickable watch links. Disable with `DIGEST_ENABLED=false`, change the hour with `DIGEST_HOUR` (0–23), or restrict everything (digest + kickoff alerts) to popular matches with `POPULAR_ONLY=true`. Preview it without sending: `npm run dry-run`.
+
 ## Adding WhatsApp later
 
 `notifier.js` exposes a provider registry — add a `whatsapp` sender with the same `(text) => Promise<void>` signature and set `NOTIFIER_PROVIDER=whatsapp`.

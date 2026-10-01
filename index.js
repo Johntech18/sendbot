@@ -32,6 +32,9 @@ const VALID_SPORTS = [
 // ── Config ───────────────────────────────────────────────────────────────
 const DRY_RUN = process.argv.includes('--dry-run');
 const LEAD_MINUTES = parseInt(process.env.LEAD_MINUTES || '5', 10);
+const DIGEST_ENABLED = (process.env.DIGEST_ENABLED || 'true') === 'true';
+const DIGEST_HOUR = parseInt(process.env.DIGEST_HOUR || '8', 10);   // WAT hour, 0-23
+const POPULAR_ONLY = (process.env.POPULAR_ONLY || 'false') === 'true';
 const SPORTS = (process.env.SPORTS || 'football')
     .split(',')
     .map(s => s.trim().toLowerCase())
@@ -39,6 +42,10 @@ const SPORTS = (process.env.SPORTS || 'football')
 
 if (SPORTS.some(s => !VALID_SPORTS.includes(s))) {
     console.error(`Unknown sport in SPORTS. Valid values: ${VALID_SPORTS.join(', ')}`);
+    process.exit(1);
+}
+if (!(DIGEST_HOUR >= 0 && DIGEST_HOUR <= 23)) {
+    console.error('DIGEST_HOUR must be 0-23 (WAT).');
     process.exit(1);
 }
 
@@ -126,6 +133,84 @@ function escapeHtml(value) {
         .replace(/>/g, '&gt;');
 }
 
+// ── Daily digest ───────────────────────────────────────────────────────────────
+// Posts one message each morning listing today's matches (WAT times),
+// with per-sport sections and watch links.
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+let lastDigestDate = null;   // 'YYYY-MM-DD' (WAT) of the last digest sent
+
+function watDateString(ms) {
+    return new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Africa/Lagos' }); // YYYY-MM-DD
+}
+
+function currentWatHour() {
+    return Number(new Date().toLocaleString('en-GB', {
+        hour: '2-digit', hour12: false, timeZone: 'Africa/Lagos',
+    }));
+}
+
+function buildDigest(matches, dayStr) {
+    const bySport = new Map();
+    for (const m of matches) {
+        const sport = m.category || 'other';
+        if (!bySport.has(sport)) bySport.set(sport, []);
+        bySport.get(sport).push(m);
+    }
+
+    const lines = [`📅 <b>Today's schedule</b> — ${dayStr}${POPULAR_ONLY ? ' (popular only)' : ''}`];
+    for (const [sport, list] of bySport) {
+        const emoji = SPORT_EMOJI[sport] || '📣';
+        lines.push('', `${emoji} <b>${sport.charAt(0).toUpperCase() + sport.slice(1)}</b>`);
+        for (const m of list.sort((a, b) => a.date - b.date)) {
+            const time = new Date(m.date).toLocaleTimeString('en-NG', {
+                hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Lagos',
+            });
+            const star = m.popular ? ' ⭐' : '';
+            lines.push(`• ${time} — <a href="${watchUrl(m)}">${escapeHtml(m.title)}</a>${star}`);
+        }
+    }
+    lines.push('', `📺 Watch all free on sports.bigreel.com.ng`);
+    return lines.join('\n');
+}
+
+async function sendDigestIfDue(sendFn) {
+    const now = Date.now();
+    const today = watDateString(now);
+    if (lastDigestDate === today) return false;
+    if (currentWatHour() < DIGEST_HOUR) return false;   // wait until the configured hour
+
+    const matches = await fetchMatches();
+    const todays = matches.filter(m => {
+        if (!SPORTS.includes((m.category || '').toLowerCase())) return false;
+        if (POPULAR_ONLY && !m.popular) return false;
+        // Keep matches whose WAT date string equals today's
+        return watDateString(m.date) === today;
+    });
+
+    if (todays.length === 0) {
+        console.log('  Digest: no matches today, skipping');
+        lastDigestDate = today;
+        return false;
+    }
+
+    const message = buildDigest(todays, today);
+    if (DRY_RUN) {
+        console.log(`[DRY-RUN] Would send digest (${todays.length} matches):`);
+        console.log(message.replace(/<[^>]+>/g, ''));
+    } else {
+        try {
+            await sendFn(message);
+            console.log(`✓ Sent daily digest (${todays.length} matches)`);
+        } catch (err) {
+            console.error(`✗ Digest send failed: ${err.message}`);
+            return false;   // retry on next poll
+        }
+    }
+    lastDigestDate = today;
+    return true;
+}
+
 // ── Core check loop ──────────────────────────────────────────────────────
 async function checkAndNotify(sendFn) {
     const matches = await fetchMatches();
@@ -166,6 +251,9 @@ async function main() {
     console.log(`Bigreel notifier starting`);
     console.log(`  Sports: ${SPORTS.join(', ')}`);
     console.log(`  Lead: ${LEAD_MINUTES} min | Poll: every ${POLL_INTERVAL_MS / 1000}s | Dry-run: ${DRY_RUN}`);
+    if (DIGEST_ENABLED) {
+        console.log(`  Digest: daily at ${String(DIGEST_HOUR).padStart(2, '0')}:00 WAT${POPULAR_ONLY ? ' | popular matches only' : ''}`);
+    }
 
     const sendFn = DRY_RUN ? async () => {} : getNotifier();
     if (!DRY_RUN) console.log('  Notifier: telegram');
@@ -186,6 +274,9 @@ async function main() {
 
     const tick = async () => {
         try {
+            if (DIGEST_ENABLED && !process.argv.includes('--no-digest')) {
+                await sendDigestIfDue(sendFn);
+            }
             const n = await checkAndNotify(sendFn);
             if (n > 0) console.log(`  Processed ${n} match(es) this poll`);
         } catch (err) {

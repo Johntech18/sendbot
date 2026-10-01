@@ -19,3 +19,9 @@ services:
         value: "5"
       - key: SITE_BASE_URL
         value: https://sports.bigreel.com.ng
+      - key: DIGEST_ENABLED
+        value: "true"
+      - key: DIGEST_HOUR
+        value: "8"
+      - key: POPULAR_ONLY
+        value: "false"
