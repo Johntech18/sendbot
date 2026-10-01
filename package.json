@@ -1,0 +1,14 @@
+{
+  "name": "bigreel-match-notifier",
+  "version": "1.0.0",
+  "description": "Sends a Telegram notification 5 minutes before each match on sports.bigreel.com.ng kicks off",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dry-run": "node index.js --dry-run"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}
